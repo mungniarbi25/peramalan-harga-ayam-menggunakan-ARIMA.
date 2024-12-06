@@ -1,0 +1,408 @@
+---
+title: "MPDW Ayam 500 Data Terakhir"
+author: "R. Mugni Chairil Arbi"
+date: "6/12/2024"
+output: rmdformats::downcute
+---
+
+```{r}
+library(dplyr)
+library(imputeTS)
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(TSA)
+library(TTR)
+library(aTSA)
+library(graphics)
+library(readxl)
+```
+
+# Import Data
+
+```{r}
+harga <- read_excel("C:/Users/Mugni Statistika IPB/Documents/Semester 5/MPDW/TUGAS AKHIR/dataayam.xlsx")
+str(harga)
+```
+
+```{r}
+data <- harga$"Daging Ayam"
+data
+```
+
+# Imputation
+
+```{r}
+result <- c()
+# Loop untuk menyisipkan dua NA setelah setiap 5 elemen
+for (i in seq(1, length(data), by = 5)) {
+  # Ambil 5 elemen
+  chunk <- data[i:(i+4)]
+  # Tambahkan ke hasil, diikuti dengan dua NA
+  result <- c(result, chunk, NA, NA)
+}
+data <- result
+data
+```
+
+```{r}
+data <- na_interpolation(data, option = "linear")
+data
+length(data)
+```
+
+```{r}
+data_ts <- ts(data, frequency = 7)  # Jika ingin pola mingguan
+dec.co2 <- stl(data_ts, s.window = "periodic")  # Menggunakan STL decomposition
+plot(dec.co2)
+
+```
+
+```{r}
+seasonplot(data_ts, 7, main="Seasonal Plot", ylab="Values",
+           year.labels = TRUE, col=rainbow(18))
+
+# Jika data harian dan ingin melihat pola bulanan
+data_ts <- ts(data, frequency = 30)  # frekuensi bulanan
+seasonplot(data_ts, 30, main="Seasonal Plot", ylab="Values",
+           year.labels = TRUE, col=rainbow(18))
+
+```
+
+```{r}
+data <- data[201:700]
+sort(data)
+```
+
+```{r}
+data.ts <- as.ts(data)
+plot(data.ts, ylab= "Harga Daging Ayam", xlab = "Periode")
+```
+
+# Pembagian data uji dan latih
+
+```{r}
+train.ts <- as.ts(data[1:400])
+plot(train.ts)
+test.ts <- as.ts(data[400:500])
+plot(test.ts)
+```
+
+# Cek kestasioneran
+
+## Plot ACF
+
+```{r}
+acf(train.ts)
+```
+
+## Uji ADF
+
+```{r}
+tseries::adf.test(train.ts)
+```
+
+## Cek Box Cox
+
+```{r}
+index <- seq(1:400)
+bc = boxcox(train.ts~index, lambda = seq(-4,5,by=1))
+#Nilai Rounded Lambda
+lambda <- bc$x[which.max(bc$y)]
+lambda
+#SK
+bc$x[bc$y > max(bc$y) - 1/2 * qchisq(.95,1)]
+```
+
+# Penanganan
+
+## Diff sekali
+
+```{r}
+train.diff<-diff(train.ts,differences = 1)
+train.diff
+plot.ts(train.diff, lty=1, xlab="Period", ylab="Chicken Meat Prices (d=1)")
+```
+
+```{r}
+acf(train.diff)
+```
+
+## Uji ADF
+
+```{r}
+tseries::adf.test(train.diff)
+```
+
+## Cek Box Cox
+
+```{r}
+#ditambahkan 1001, untuk menghilangkan nilai negatif dan nol
+transdiff.ts <- (train.diff + 6000)
+plot(transdiff.ts)
+```
+
+# Identifikasi Model
+
+## Plot ACF
+
+```{r}
+acf(train.diff)
+```
+
+Jika dianggap cuts off, didapatkan model tentatifnya ARIMA(0,1,1)
+
+## Plot PACF
+
+```{r}
+pacf(train.diff)
+```
+
+model (1,1,0)
+
+## Plot EACF
+
+```{r}
+eacf(train.diff)
+```
+
+model (1,1,1) (1,1,5) (0,1,1) (1,1,0) (4,1,5) (5,1,5) (gabungan dengan acf dan pacf)
+
+# Pendugaan Parameter Model Tentatif
+
+## ARIMA(1,1,1)
+
+```{r}
+model1.da=Arima(train.diff, order=c(1,0,1),method="ML")
+summary(model1.da) #AIC=732.68
+lmtest::coeftest(model1.da) #seluruh parameter signifikan
+```
+
+## ARIMA(1,1,5)
+
+```{r}
+model2.da=Arima(train.diff, order=c(1,0,5),method="ML")
+summary(model2.da) #AIC=763.81
+lmtest::coeftest(model2.da) #seluruh parameter signifikan
+```
+
+## ARIMA(0,1,1)
+
+```{r}
+model3.da=Arima(train.diff, order=c(0,0,1),method="ML")
+summary(model3.da) #AIC=725.95
+lmtest::coeftest(model3.da) #seluruh parameter signifikan
+```
+
+## ARIMA(1,1,0)
+
+```{r}
+model4.da=Arima(train.diff, order=c(1,0,0),method="ML")
+summary(model4.da) #AIC=726.83
+lmtest::coeftest(model4.da) #terdapat parameter tidak signifikan
+```
+
+## ARIMA(4,1,5)
+
+```{r}
+model5.da=Arima(train.diff, order=c(4,0,5),method="ML")
+summary(model5.da) #AIC=727.57
+lmtest::coeftest(model5.da) #terdapat parameter tidak signifikan
+```
+
+## ARIMA(5,1,5)
+
+```{r}
+model6.da=Arima(train.diff, order=c(5,0,5),method="ML")
+summary(model6.da) #AIC=727.57
+lmtest::coeftest(model6.da) #terdapat parameter tidak signifikan
+```
+
+Berdasarkan pendugaan parameter di atas, parameter model ARIMA(0,1,1) seluruhnya signifikan namun bukan model dengan AIC terkecil sehingga yang dipilih adalah model ARIMA(0,1,1).
+
+# Analisis Sisaan
+
+Model terbaik hasil identifikasi kemudian dicek asumsi sisaannya. Sisaan model ARIMA harus memenuhi asumsi normalitas, kebebasan sisaan, dan kehomogenan ragam. Diagnostik model dilakukan secara eksplorasi dan uji formal.
+
+## Eksplorasi Sisaan
+
+```{r}
+#Eksplorasi 
+sisaan.da <- model3.da$residuals 
+par(mfrow=c(2,2)) 
+qqnorm(sisaan.da) 
+qqline(sisaan.da, col = "blue", lwd = 2) 
+plot(c(1:length(sisaan.da)),sisaan.da, xlab = "Period", ylab="Residuals") 
+acf(sisaan.da) 
+pacf(sisaan.da) 
+par(mfrow = c(1,1))
+```
+
+## Uji Formal
+
+```{r}
+#1) Sisaan Menyebar Normal 
+tseries::jarque.bera.test(sisaan.da)  #tak tolak H0 > sisaan menyebar normal
+```
+
+```{r}
+#2) Sisaan saling bebas/tidak ada autokorelasi 
+Box.test(sisaan.da, type = "Ljung")  #tak tolak H0 > sisaan saling bebas
+```
+
+```{r}
+#3) Sisaan homogen 
+Box.test((sisaan.da)^2, type = "Ljung")  #tak tolak H0 > sisaan homogen
+```
+
+```{r}
+#4) Nilai tengah sisaan sama dengan nol 
+t.test(sisaan.da, mu = 0, conf.level = 0.95)  #tak tolak h0 > nilai tengah sisaan sama dengan 0
+```
+
+# Overfitting
+
+Tahapan selanjutnya adalah *overfitting* dilakukan dengan menaikkan orde AR(p) dan MA(q) dari model ARIMA(0,1,1) untuk melihat apakah terdapat model lain yang lebih baik dari model saat ini. Kandidat model *overfitting* adalah ARIMA(1,1,1) dan ARIMA(0,1,2).
+
+```{r}
+#---OVERFITTING---#
+model1a.ma2=Arima(train.diff, order=c(1,0,1),method="ML")
+summary(model1a.ma2) #724.28
+lmtest::coeftest(model1a.ma2) #ar1 tidak signifikan
+
+model1b.ma2=Arima(train.diff, order=c(0,0,2),method="ML")
+summary(model1b.ma2) #724.3
+lmtest::coeftest(model1b.ma2) #ma3 tidak signifikan
+
+#model yang dipilih adalah model awal, yaitu ARIMA(0,0,2)
+```
+
+ARIMA (0,1,1)
+
+# Peramalan untuk test
+
+Peramalan dilakukan menggunakan fungsi `forecast()` . Contoh peramalan berikut ini dilakukan untuk 30 hari ke depan.
+
+```{r}
+#---FORECAST---#
+ramalan.da <- forecast::forecast(model3.da, h = 100) 
+ramalan.da
+data.ramalan.da <- ramalan.da$mean
+plot(ramalan.da)
+```
+
+Berdasarkan hasil plot ramalan di atas, dapat dilihat bahwa ramalan ARIMA(1,1,1) cenderung stabil hingga akhir periode. Selanjutnya, dapat dicari nilai akurasi antara hasil ramalan dengan data uji sebagai berikut.
+
+```{r}
+pt_1 <- train.ts[400] #nilai akhir data latih
+hasil.forc.Diff <- data.ramalan.da
+hasil <- diffinv(hasil.forc.Diff, differences = 1) + pt_1
+#has.1 sama hasilnta dengan: cumsum(c(pt_1,hasil.forc.Diff))
+ts.plot(train.ts,hasil)
+plot.ts(test.ts, xlab="waktu", ylab="Minyak", main="Plot Minyak Test")
+```
+
+```{r}
+perbandingan.da<-matrix(data=c(head(test.ts, n=100), hasil[-1]),
+                     nrow = 100, ncol = 2)
+colnames(perbandingan.da)<-c("Aktual","Hasil Forecast")
+perbandingan.da
+accuracy(ts(hasil[-1]), head(test.ts, n=100))
+```
+
+MAPE test nya 4.9
+
+```{r}
+fitted_values <- fitted(model3.da)
+fit_train <- diffinv(fitted_values, differences = 1) + train.ts[1]
+accuracy(fit_train, train.ts)
+```
+
+Mape trainnya 3.5
+
+```{r}
+# Plot pertama (data x)
+plot(hasil[-1], type = "l", col = "blue", xlab = "Index", ylab = "Values", main = "Overlay of x and y")
+
+# Menumpuk plot kedua (data y)
+par(new = TRUE)
+plot(test.ts, type = "l", col = "red", xlab = "", ylab = "", axes = FALSE)
+```
+
+# Peramalan 14 hari
+
+```{r}
+data.diff<-diff(data.ts,differences = 1)
+model.penuh=Arima(data.diff, order=c(0,0,1),method="ML")
+summary(model.penuh) #AIC=725.95
+lmtest::coeftest(model.penuh) #seluruh parameter signifikan
+```
+
+```{r}
+#---FORECAST---#
+ramalan <- forecast::forecast(model.penuh, h = 14) 
+ramalan
+data.ramalan <- ramalan$mean
+plot(ramalan)
+```
+
+```{r}
+pt_2 <- data.ts[500] #nilai akhir data latih
+hasil.forc.Diff2 <- data.ramalan
+hasil2 <- diffinv(hasil.forc.Diff2, differences = 1) + pt_2
+hasil2
+#has.1 sama hasilnta dengan: cumsum(c(pt_1,hasil.forc.Diff))
+```
+
+```{r}
+plot(hasil2)
+```
+
+```{r}
+tanggal_awal <- as.Date("2022-09-05")
+tanggal_akhir <- as.Date("2024-08-04")
+
+# Menghasilkan 700 tanggal secara berkala dari tanggal awal hingga tanggal akhir
+tanggal <- seq(from = tanggal_awal, to = tanggal_akhir, length.out = 700)
+tanggal <- tanggal[-c(1:200)]
+
+buatplot <- as.data.frame(cbind("tanggal"=tanggal, "harga"=data))
+buatplot$tanggal <- as.Date(buatplot$tanggal)
+head(buatplot)
+```
+
+```{r}
+# plot harian
+ggplot(buatplot, aes(x=tanggal, y=harga)) +
+  geom_line() +
+  labs(title = "Plot Harga Daging Ayam",
+       subtitle = "24 Maret 2023 - 4 Agustus 2024", x="Date", y="Chicken Meat Prices") +
+  theme(plot.title =  element_text(face = "bold", hjust=.5),
+        plot.subtitle = element_text(hjust=.5),
+        legend.position = "bottom",
+        panel.background = element_rect(fill=NA))
+```
+
+```{r}
+buatplot2 <-buatplot[c(1:400),]
+ggplot(buatplot2, aes(x=tanggal, y=harga)) +
+  geom_line() +
+  labs(title = "Plot Harga Daging Ayam",
+       subtitle = "24 Maret 2023 - 4 Agustus 2024",x="Date", y="Chicken Meat Prices") +
+  theme(plot.title =  element_text(face = "bold", hjust=.5),
+        plot.subtitle = element_text(hjust=.5),
+        legend.position = "bottom",
+        panel.background = element_rect(fill=NA))
+```
+
+```{r}
+# Plot data asli
+plot(data.ts, type = "l", col = "blue", lwd = 2, ylab = "Chicken Meat Prices", xlab = "Period", main = "Plot Data Asli dan Forecast")
+# Tambahkan data forecast
+lines(hasil2, col = "red", lwd = 2)
+# Tambahkan legenda
+legend("topright", legend = c("Actual Data", "Forecast"), col = c("blue", "red"), lwd = 2, bty = "n")
+
+```
